@@ -63,6 +63,9 @@
     () ; unknown
     #+sbcl
     (sb-impl::fd-stream-timeout (socket-stream usocket))
+    #+torcl
+    (let ((milliseconds (torcl::%socket-read-timeout (socket-stream usocket))))
+      (when milliseconds (/ milliseconds 1000)))
     #+scl
     ())) ; TODO
 
@@ -94,6 +97,9 @@
     #+sbcl
     (setf (sb-impl::fd-stream-timeout (socket-stream usocket))
           (coerce timeout 'single-float))
+    #+torcl
+    (torcl::%socket-read-timeout (socket-stream usocket)
+                                (torcl-timeout-milliseconds timeout))
     #+scl
     () ; TODO
     new-value))

@@ -34,6 +34,8 @@
                   :depends-on ("condition")
                   :components ((:file "iolib"
                                 :if-feature :usocket-iolib)
+                               (:file "torcl"
+                                :if-feature (:and :torcl (:not :usocket-iolib)))
                                (:file "abcl"
                                 :if-feature (:and :abcl
                                                   (:not :usocket-iolib)))
