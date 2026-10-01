@@ -18,7 +18,7 @@
          (assert (eq :end (read-byte stream nil :end))))
     (usocket:socket-close socket))
   (assert (not (open-stream-p stream))))
-#+torcl
+#+egcl
 (dolist (options '((:protocol :datagram)
                    (:element-type character)
                    (:element-type (unsigned-byte 8) :deadline 1)

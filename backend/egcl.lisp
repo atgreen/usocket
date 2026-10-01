@@ -1,9 +1,9 @@
-;;;; Native TorCL TCP byte-stream client backend.
+;;;; Native EGCL TCP byte-stream client backend.
 ;;;; See LICENSE for licensing information.
 
 (in-package :usocket)
 
-(defun torcl-timeout-milliseconds (seconds)
+(defun egcl-timeout-milliseconds (seconds)
   (when seconds
     (check-type seconds (real (0) *))
     (ceiling (* seconds 1000))))
@@ -33,8 +33,8 @@
   (when (and nodelay-p (not (member nodelay '(t :if-supported))))
     (error 'unimplemented :feature :nodelay :context 'socket-connect))
   (with-mapped-conditions ()
-    (let ((stream (torcl::%socket-connect (host-to-hostname host) port
-                                         (torcl-timeout-milliseconds timeout))))
+    (let ((stream (egcl::%socket-connect (host-to-hostname host) port
+                                         (egcl-timeout-milliseconds timeout))))
       (make-stream-socket :socket stream :stream stream))))
 
 (defmethod socket-close ((socket stream-usocket))
