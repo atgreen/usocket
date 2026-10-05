@@ -22,7 +22,8 @@
   ;; substitute octets for a requested character stream or ignore local binding.
   (unless (eq protocol :stream)
     (error 'unimplemented :feature protocol :context 'socket-connect))
-  (unless (equal element-type '(unsigned-byte 8))
+  (unless (equal (egcl-internal::%expand-type-spec element-type)
+                 '(unsigned-byte 8))
     (error 'unimplemented :feature element-type :context 'socket-connect))
   (when deadline
     (error 'unimplemented :feature :deadline :context 'socket-connect))

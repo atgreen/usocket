@@ -14,11 +14,12 @@ with socket.socket() as listener:
 
     def serve():
         try:
-            with listener.accept()[0] as peer:
-                peer.settimeout(10)
-                peer.sendall(bytes([65]))
-                assert peer.recv(1) == bytes([42]), "missing client acknowledgement"
-                peer.sendall(bytes([200, 255]))
+            for _ in range(3):
+                with listener.accept()[0] as peer:
+                    peer.settimeout(10)
+                    peer.sendall(bytes([65]))
+                    assert peer.recv(1) == bytes([42]), "missing client acknowledgement"
+                    peer.sendall(bytes([200, 255]))
         except Exception as error:
             errors.append(error)
 
