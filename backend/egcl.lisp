@@ -10,12 +10,17 @@
 
 (defun handle-condition (condition &optional socket host-or-ip)
   (declare (ignore host-or-ip))
-  (when (typep condition '(or file-error stream-error))
-    (error 'unknown-error :socket socket :real-error condition)))
+  (typecase condition
+    (egcl-ext:io-timeout
+     (error 'timeout-error :socket socket))
+    ((or file-error stream-error)
+     (error 'unknown-error :socket socket :real-error condition))))
 
 (defun socket-connect-internal
     (host &key port (protocol :stream) (element-type 'character)
-               timeout deadline (nodelay nil nodelay-p)
+               timeout (connection-timeout nil connection-timeout-p)
+               (read-timeout nil read-timeout-p)
+               deadline (nodelay nil nodelay-p)
                (local-host nil local-host-p) (local-port nil local-port-p))
   (declare (ignore local-host local-port))
   ;; Reject unsupported requests before opening a descriptor; never silently
@@ -34,9 +39,17 @@
   (when (and nodelay-p (not (member nodelay '(t :if-supported))))
     (error 'unimplemented :feature :nodelay :context 'socket-connect))
   (with-mapped-conditions ()
-    (let ((stream (egcl::%socket-connect (host-to-hostname host) port
-                                         (egcl-timeout-milliseconds timeout))))
-      (make-stream-socket :socket stream :stream stream))))
+    (let* ((connect-ms (egcl-timeout-milliseconds
+                        (if connection-timeout-p connection-timeout timeout)))
+           (read-ms (egcl-timeout-milliseconds
+                     (if read-timeout-p read-timeout timeout)))
+           (stream (egcl::%socket-connect (host-to-hostname host) port connect-ms))
+           (socket nil))
+      (unwind-protect
+           (progn
+             (egcl::%socket-read-timeout stream read-ms)
+             (setf socket (make-stream-socket :socket stream :stream stream)))
+        (unless socket (close stream :abort t))))))
 
 (defmethod socket-close ((socket stream-usocket))
   (close (socket-stream socket)))
