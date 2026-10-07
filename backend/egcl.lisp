@@ -1,4 +1,4 @@
-;;;; Native EGCL TCP byte-stream client backend.
+;;;; Native EGCL TCP byte-stream backend.
 ;;;; See LICENSE for licensing information.
 
 (in-package :usocket)
@@ -40,3 +40,40 @@
 
 (defmethod socket-close ((socket stream-usocket))
   (close (socket-stream socket)))
+
+(defun socket-listen-internal
+    (host &key port reuseaddress (reuse-address nil reuse-address-p)
+               (backlog 5) (element-type 'character))
+  (unless (equal (egcl-internal::%expand-type-spec element-type)
+                 '(unsigned-byte 8))
+    (error 'unimplemented :feature element-type :context 'socket-listen))
+  (when (pathnamep host)
+    (error 'unimplemented :feature :unix-domain-socket :context 'socket-listen))
+  (with-mapped-conditions (nil host)
+    (let ((listener (egcl::%socket-listen
+                     (host-to-hostname host)
+                     (or port *auto-port*) backlog
+                     (if reuse-address-p reuse-address reuseaddress)))
+          (server nil))
+      (unwind-protect
+           (setf server (make-stream-server-socket listener :element-type element-type))
+        (unless server (egcl::%socket-close listener))))))
+
+(defmethod socket-accept ((server stream-server-usocket) &key element-type)
+  (unless (equal (egcl-internal::%expand-type-spec
+                   (or element-type (element-type server)))
+                 '(unsigned-byte 8))
+    (error 'unimplemented :feature element-type :context 'socket-accept))
+  (with-mapped-conditions (server)
+    (let ((stream (egcl::%socket-accept (socket server)))
+          (peer nil))
+      (unwind-protect
+           (setf peer (make-stream-socket :socket stream :stream stream))
+        (unless peer (close stream))))))
+
+(defmethod socket-close ((server stream-server-usocket))
+  (egcl::%socket-close (socket server)))
+
+(defmethod get-local-port ((server stream-server-usocket))
+  (or (egcl::%socket-local-port (socket server))
+      (error 'invalid-socket-error :socket server)))
