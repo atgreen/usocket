@@ -98,4 +98,51 @@
         (when client (usocket:socket-close client))
         (usocket:socket-close listener)))))
 
+#+egcl
+;;; Address queries on a listener and on both ends of a connection.
+;;;
+;;; The cross-checks are the point: the client's PEER port must be the
+;;; listener's port, and the server's PEER port must be the client's LOCAL
+;;; port. A backend that answered the local address for both ends would satisfy
+;;; a shape check and fail both of these.
+(let* ((listener (usocket:socket-listen "127.0.0.1" 0 :element-type '(unsigned-byte 8)
+                                        :reuse-address t :backlog 2))
+       (port (usocket:get-local-port listener))
+       (peer nil)
+       (client nil))
+  (unwind-protect
+       (progn
+         ;; A listener reports the address it is bound to, and GET-LOCAL-NAME
+         ;; answers both halves at once.
+         (assert (equalp #(127 0 0 1) (usocket:get-local-address listener)))
+         (multiple-value-bind (address listener-port) (usocket:get-local-name listener)
+           (assert (equalp #(127 0 0 1) address))
+           (assert (= port listener-port)))
+         (let ((worker (egcl-thread:make-thread
+                        (lambda () (setf peer (usocket:socket-accept listener)) :ok))))
+           (setf client (usocket:socket-connect "127.0.0.1" port
+                                                :element-type '(unsigned-byte 8)))
+           (egcl-thread:join-thread worker))
+         (dolist (socket (list peer client))
+           (assert (equalp #(127 0 0 1) (usocket:get-local-address socket)))
+           (assert (equalp #(127 0 0 1) (usocket:get-peer-address socket)))
+           (assert (plusp (usocket:get-local-port socket)))
+           (assert (plusp (usocket:get-peer-port socket))))
+         ;; The accepted socket is bound to the listener's port.
+         (assert (= port (usocket:get-local-port peer)))
+         ;; Opposite ends, not the same one twice.
+         (assert (= port (usocket:get-peer-port client)))
+         (assert (= (usocket:get-local-port client) (usocket:get-peer-port peer)))
+         ;; usocket's own helper consumes the octet vector.
+         (assert (string= "127.0.0.1"
+                          (usocket:host-to-hostname
+                           (usocket:get-peer-address client)))))
+    (when peer (usocket:socket-close peer))
+    (when client (usocket:socket-close client))
+    (usocket:socket-close listener))
+  ;; A closed listener signals rather than answering a stale address.
+  (assert (eq :invalid
+              (handler-case (progn (usocket:get-local-name listener) :no-error)
+                (usocket:invalid-socket-error () :invalid)))))
+
 #+egcl (format t "USOCKET-NATIVE-SERVER-OK~%")
