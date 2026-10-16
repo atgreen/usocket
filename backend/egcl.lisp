@@ -132,3 +132,91 @@
 ;;; %SOCKET-LOCAL-PORT path through the more specific method above.
 (defmethod get-local-port ((usocket usocket))
   (nth-value 1 (get-local-name usocket)))
+
+;;; WAIT-FOR-INPUT.
+;;;
+;;; usocket owns the wait-list struct, its `map' hash table and WAIT-FOR-INPUT
+;;; itself; a backend supplies %SETUP-WAIT-LIST, %ADD-WAITER, %REMOVE-WAITER
+;;; and WAIT-FOR-INPUT-INTERNAL, which reports readiness by setting each
+;;; usocket's STATE to :READ rather than by returning anything.
+;;;
+;;; EGCL answers readiness one socket at a time -- `%socket-listener-ready-p'
+;;; for a listener and `%socket-wait-for-input' for a connected stream, both
+;;; taking a millisecond timeout where zero polls and a negative value waits
+;;; indefinitely. There is no primitive that waits on several descriptors at
+;;; once, so a wait-list holding more than one socket is served by rounds of
+;;; short polls over its members. That is the shape the EGCL issue anticipated;
+;;; the common case -- an accept loop waiting on a single listener, which is
+;;; what zacl and AllegroServe do -- takes one call with the whole budget and
+;;; no polling at all.
+;;;
+;;; WAIT-FOR-INPUT pre-checks stream sockets with LISTEN and passes :timeout 0
+;;; when any is already ready, so a zero timeout must poll and return rather
+;;; than wait.
+
+(defconstant +egcl-wait-poll-ms+ 20
+  "Slice given to each socket per round when a wait-list holds several.
+Bounds how long a multi-socket wait can overshoot its deadline, and how often
+an idle wait wakes.")
+
+(defun %setup-wait-list (wait-list)
+  ;; Nothing implementation-specific to carry: the portable WAIT-LIST-WAITERS
+  ;; list is all this backend needs.
+  (declare (ignore wait-list))
+  nil)
+
+(defun %add-waiter (wait-list waiter)
+  (pushnew waiter (wait-list-%wait wait-list)))
+
+(defun %remove-waiter (wait-list waiter)
+  (setf (wait-list-%wait wait-list)
+        (remove waiter (wait-list-%wait wait-list))))
+
+(defun egcl-socket-ready-p (waiter timeout-ms)
+  "Whether WAITER has input available, waiting at most TIMEOUT-MS."
+  (etypecase waiter
+    (stream-server-usocket
+     (and (egcl::%socket-listener-ready-p (socket waiter) timeout-ms) t))
+    (stream-usocket
+     ;; Deliberately NOT (listen stream): on EGCL a LISTEN on a connected
+     ;; socket loses one octet of pending input (atgreen/evergreen
+     ;; bliss-ep1b7 -- measured: write 10,20,30 then LISTEN, and the stream
+     ;; reads back 20,30). %socket-wait-for-input answers the same question by
+     ;; polling a duplicate of the descriptor and consumes nothing, and it
+     ;; already reports buffered input as ready, so nothing is lost by
+     ;; skipping LISTEN here.
+     (and (egcl::%socket-wait-for-input (socket-stream waiter) timeout-ms) t))))
+
+(defun wait-for-input-internal (wait-list &key timeout)
+  (with-mapped-conditions ()
+    (let* ((waiters (wait-list-%wait wait-list))
+           (deadline (when timeout
+                       (+ (get-internal-real-time)
+                          (* timeout internal-time-units-per-second)))))
+      (cond
+        ((null waiters) nil)
+        ;; One socket: hand it the whole budget, so an accept loop blocks in
+        ;; the runtime rather than spinning here. A NIL timeout means wait
+        ;; indefinitely, which these primitives spell as a negative value.
+        ((null (rest waiters))
+         (let ((waiter (first waiters)))
+           (when (egcl-socket-ready-p
+                  waiter (if timeout (ceiling (* timeout 1000)) -1))
+             (setf (state waiter) :read))))
+        ;; Several sockets and no primitive that waits on all of them at once:
+        ;; poll each in turn until one is ready or the deadline passes. A zero
+        ;; timeout makes this exactly one non-blocking pass.
+        (t
+         (loop
+           (let ((ready nil))
+             (dolist (waiter waiters)
+               (when (egcl-socket-ready-p
+                      waiter (if (and timeout (zerop timeout))
+                                 0
+                                 +egcl-wait-poll-ms+))
+                 (setf (state waiter) :read
+                       ready t)))
+             (when (or ready
+                       (and timeout (zerop timeout))
+                       (and deadline (>= (get-internal-real-time) deadline)))
+               (return ready)))))))))

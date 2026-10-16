@@ -146,3 +146,47 @@
                 (usocket:invalid-socket-error () :invalid)))))
 
 #+egcl (format t "USOCKET-NATIVE-SERVER-OK~%")
+
+#+egcl
+;;; WAIT-FOR-INPUT over a listener, a connected stream, and a mixed wait-list.
+;;;
+;;; The assertion that matters most is that the waited-on data SURVIVES: a
+;;; readiness check that consumed an octet would still satisfy every "is it
+;;; ready" assertion while silently corrupting the stream, which is what a
+;;; LISTEN-based check does on EGCL (atgreen/evergreen bliss-ep1b7).
+(let* ((listener (usocket:socket-listen "127.0.0.1" 0 :element-type '(unsigned-byte 8)
+                                        :reuse-address t :backlog 2))
+       (port (usocket:get-local-port listener))
+       (client nil)
+       (peer nil))
+  (unwind-protect
+       (progn
+         ;; An idle listener times out rather than reporting a connection.
+         (assert (null (usocket:wait-for-input listener :timeout 1 :ready-only t)))
+         (setf client (usocket:socket-connect "127.0.0.1" port
+                                              :element-type '(unsigned-byte 8)))
+         ;; A pending connection is reported.
+         (assert (usocket:wait-for-input listener :timeout 5 :ready-only t))
+         (setf peer (usocket:socket-accept listener))
+         ;; An idle connected stream times out.
+         (assert (null (usocket:wait-for-input peer :timeout 1 :ready-only t)))
+         (write-byte 42 (usocket:socket-stream client))
+         (force-output (usocket:socket-stream client))
+         (assert (usocket:wait-for-input peer :timeout 5 :ready-only t))
+         ;; The octet the wait reported must still be there to read.
+         (assert (= 42 (read-byte (usocket:socket-stream peer))))
+         ;; A mixed wait-list exercises the round-robin path.
+         (let ((wait-list (usocket:make-wait-list (list listener peer))))
+           (assert (null (usocket:wait-for-input wait-list :timeout 1 :ready-only t)))
+           (write-byte 7 (usocket:socket-stream client))
+           (force-output (usocket:socket-stream client))
+           (let ((ready (usocket:wait-for-input wait-list :timeout 5 :ready-only t)))
+             (assert (= 1 (length ready)))
+             (assert (eq peer (first ready))))
+           ;; And again, nothing was consumed by the wait.
+           (assert (= 7 (read-byte (usocket:socket-stream peer))))))
+    (when peer (usocket:socket-close peer))
+    (when client (usocket:socket-close client))
+    (usocket:socket-close listener)))
+
+#+egcl (format t "USOCKET-WAIT-FOR-INPUT-OK~%")

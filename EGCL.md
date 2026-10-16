@@ -25,9 +25,24 @@ requires an EGCL build providing `egcl::%socket-local-name` and
 `egcl::%socket-peer-name`; a closed listener signals
 `usocket:invalid-socket-error`.
 
+`wait-for-input` is supported on listeners, connected streams and mixed
+wait-lists. EGCL answers readiness one descriptor at a time, so a wait-list
+holding several sockets is served by rounds of short polls; a single socket --
+an accept loop on one listener, which is what zacl and AllegroServe do -- takes
+one call with the whole budget and does not poll. This requires an EGCL build
+providing `egcl::%socket-listener-ready-p` and
+`egcl::%socket-wait-for-input`.
+
+Note that the readiness check does **not** use `LISTEN`. On EGCL a `LISTEN` on
+a connected socket loses one octet of pending input
+(atgreen/evergreen `bliss-ep1b7`), which would silently corrupt the request
+being waited for, so this branch excludes EGCL from the portable `LISTEN`
+pre-check in `wait-for-input` alongside the implementations that already cannot
+rely on it. Remove that exclusion once the runtime bug is fixed.
+
 This is not yet a complete usocket backend. Character sockets, UDP, Unix-domain
-sockets, `wait-for-input`, explicit client local binding, deadlines, and
-disabling TCP_NODELAY are not implemented. Unsupported connection options signal `usocket:unimplemented`;
+sockets, explicit client local binding, deadlines, and disabling TCP_NODELAY
+are not implemented. Unsupported connection options signal `usocket:unimplemented`;
 they are not silently ignored. Connection errors are currently reported as
 `usocket:unknown-error` retaining the original condition. DNS resolution is
 performed before the connection timeout starts. TLS belongs to the layer above

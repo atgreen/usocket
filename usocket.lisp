@@ -390,8 +390,14 @@ the values documented in usocket.lisp in the usocket class."
          (sockets-ready 0))
     (dolist (x (wait-list-waiters socket-or-sockets))
       (when (setf (state x)
-                  #+(and win32 (or sbcl ecl)) nil ; they cannot rely on LISTEN
-                  #-(and win32 (or sbcl ecl))
+                  ;; EGCL joins the implementations that cannot rely on LISTEN
+                  ;; here: on a connected socket it loses one octet of pending
+                  ;; input (atgreen/evergreen bliss-ep1b7), which would corrupt
+                  ;; the very request this wait is being done for. Its backend
+                  ;; reports readiness from %socket-wait-for-input instead,
+                  ;; which consumes nothing and already counts buffered input.
+                  #+(or (and win32 (or sbcl ecl)) egcl) nil
+                  #-(or (and win32 (or sbcl ecl)) egcl)
                   (if (and (stream-usocket-p x)
                            (listen (socket-stream x)))
                       :read
