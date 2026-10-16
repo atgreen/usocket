@@ -90,3 +90,45 @@
 (defmethod get-local-port ((server stream-server-usocket))
   (or (egcl::%socket-local-port (socket server))
       (error 'invalid-socket-error :socket server)))
+
+;;; Address queries.
+;;;
+;;; EGCL reports an endpoint as a two-element list of an octet vector and a
+;;; port -- `egcl::%socket-local-name' accepts either a listener id or a
+;;; connected stream, `egcl::%socket-peer-name' a connected stream -- so one
+;;; call answers both halves, the way `sb-bsd-sockets:socket-name' returns them
+;;; as multiple values. usocket's HOST-TO-HOSTNAME already accepts a 4-octet
+;;; vector for IPv4 and a 16-octet vector for IPv6, which is exactly what the
+;;; primitive produces, so no conversion is needed for either family.
+;;;
+;;; GET-LOCAL-NAME and GET-PEER-NAME are the primary operations and the
+;;; single-value accessors read off them, as the SBCL backend does.
+
+(defun egcl-endpoint-values (name socket)
+  "Spread EGCL's (OCTETS PORT) endpoint list into two values."
+  (unless name
+    ;; A closed listener answers NIL, matching %SOCKET-LOCAL-PORT.
+    (error 'invalid-socket-error :socket socket))
+  (values (first name) (second name)))
+
+(defmethod get-local-name ((usocket usocket))
+  (with-mapped-conditions (usocket)
+    (egcl-endpoint-values (egcl::%socket-local-name (socket usocket)) usocket)))
+
+(defmethod get-peer-name ((usocket stream-usocket))
+  (with-mapped-conditions (usocket)
+    (egcl-endpoint-values (egcl::%socket-peer-name (socket usocket)) usocket)))
+
+(defmethod get-local-address ((usocket usocket))
+  (nth-value 0 (get-local-name usocket)))
+
+(defmethod get-peer-address ((usocket stream-usocket))
+  (nth-value 0 (get-peer-name usocket)))
+
+(defmethod get-peer-port ((usocket stream-usocket))
+  (nth-value 1 (get-peer-name usocket)))
+
+;;; Connected sockets had no port query at all; listeners keep the cheaper
+;;; %SOCKET-LOCAL-PORT path through the more specific method above.
+(defmethod get-local-port ((usocket usocket))
+  (nth-value 1 (get-local-name usocket)))

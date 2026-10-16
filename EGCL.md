@@ -16,10 +16,18 @@ an EGCL build with shared native listeners and the four-argument
 `egcl::%socket-listen`, plus `%socket-accept`, `%socket-close`, and
 `%socket-local-port`.
 
+Address queries are supported on listeners and connected streams:
+`get-local-name`, `get-local-address`, `get-local-port`, `get-peer-name`,
+`get-peer-address` and `get-peer-port`. The address is an octet vector -- four
+elements for IPv4, sixteen for IPv6 -- which is what `host-to-hostname` and
+`vector-to-ipv6-host` already accept, so no conversion happens here. This
+requires an EGCL build providing `egcl::%socket-local-name` and
+`egcl::%socket-peer-name`; a closed listener signals
+`usocket:invalid-socket-error`.
+
 This is not yet a complete usocket backend. Character sockets, UDP, Unix-domain
-sockets, `wait-for-input`, address queries, connected-socket port queries,
-explicit client local binding, deadlines, and disabling TCP_NODELAY are
-not implemented. Unsupported connection options signal `usocket:unimplemented`;
+sockets, `wait-for-input`, explicit client local binding, deadlines, and
+disabling TCP_NODELAY are not implemented. Unsupported connection options signal `usocket:unimplemented`;
 they are not silently ignored. Connection errors are currently reported as
 `usocket:unknown-error` retaining the original condition. DNS resolution is
 performed before the connection timeout starts. TLS belongs to the layer above
