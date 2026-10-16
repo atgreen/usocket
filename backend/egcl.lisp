@@ -94,12 +94,18 @@
 ;;; Address queries.
 ;;;
 ;;; EGCL reports an endpoint as a two-element list of an octet vector and a
-;;; port -- `egcl::%socket-local-name' accepts either a listener id or a
-;;; connected stream, `egcl::%socket-peer-name' a connected stream -- so one
-;;; call answers both halves, the way `sb-bsd-sockets:socket-name' returns them
-;;; as multiple values. usocket's HOST-TO-HOSTNAME already accepts a 4-octet
-;;; vector for IPv4 and a 16-octet vector for IPv6, which is exactly what the
-;;; primitive produces, so no conversion is needed for either family.
+;;; port, so one call answers both halves, the way
+;;; `sb-bsd-sockets:socket-name' returns them as multiple values. usocket's
+;;; HOST-TO-HOSTNAME already accepts a 4-octet vector for IPv4 and a 16-octet
+;;; vector for IPv6, which is exactly what the primitive produces, so no
+;;; conversion is needed for either family.
+;;;
+;;; A listener and a connection are different things to EGCL -- a listener is
+;;; an integer id, a connection a stream -- and each has its own primitive:
+;;; `egcl::%socket-listener-local-name' for the server socket,
+;;; `egcl::%socket-local-name' and `egcl::%socket-peer-name' for a connection.
+;;; So GET-LOCAL-NAME specializes on the two usocket classes rather than
+;;; switching on what `socket' happens to hold.
 ;;;
 ;;; GET-LOCAL-NAME and GET-PEER-NAME are the primary operations and the
 ;;; single-value accessors read off them, as the SBCL backend does.
@@ -111,9 +117,14 @@
     (error 'invalid-socket-error :socket socket))
   (values (first name) (second name)))
 
-(defmethod get-local-name ((usocket usocket))
+(defmethod get-local-name ((usocket stream-usocket))
   (with-mapped-conditions (usocket)
     (egcl-endpoint-values (egcl::%socket-local-name (socket usocket)) usocket)))
+
+(defmethod get-local-name ((usocket stream-server-usocket))
+  (with-mapped-conditions (usocket)
+    (egcl-endpoint-values (egcl::%socket-listener-local-name (socket usocket))
+                          usocket)))
 
 (defmethod get-peer-name ((usocket stream-usocket))
   (with-mapped-conditions (usocket)
