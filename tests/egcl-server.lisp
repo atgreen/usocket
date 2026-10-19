@@ -37,10 +37,54 @@
       (usocket:socket-close listener))))
 
 #+egcl
-(dolist (element-type '(character (unsigned-byte 16)))
+(dolist (element-type '((unsigned-byte 16)))
   (assert (handler-case
               (progn (usocket:socket-listen "127.0.0.1" 0 :element-type element-type) nil)
             (usocket:unimplemented () t))))
+
+#+egcl
+;;; A character listener -- the default -- binds, reports its port and closes,
+;;; which is all a port probe needs. Accepting a character stream from it is
+;;; still refused rather than silently handing back octets.
+(dolist (options '(() (:element-type character)))
+  (let ((listener (apply #'usocket:socket-listen "127.0.0.1" 0 options)))
+    (unwind-protect
+         (let* ((port (usocket:get-local-port listener))
+                (client (usocket:socket-connect "127.0.0.1" port
+                                                :element-type '(unsigned-byte 8))))
+           (unwind-protect
+                (progn
+                  (assert (plusp port))
+                  (assert (handler-case
+                              (progn (usocket:socket-accept listener) nil)
+                            (usocket:unimplemented () t)))
+                  (usocket:socket-close
+                   (usocket:socket-accept listener
+                                          :element-type '(unsigned-byte 8))))
+             (usocket:socket-close client)))
+      (usocket:socket-close listener))))
+
+#+egcl
+;;; OS errors arrive as their usocket conditions, not as UNKNOWN-ERROR with
+;;; errno 0: a second bind of a live port is ADDRESS-IN-USE-ERROR, and a
+;;; connection to a port nobody listens on is CONNECTION-REFUSED-ERROR.
+(let* ((listener (usocket:socket-listen "127.0.0.1" 0
+                                        :element-type '(unsigned-byte 8)))
+       (port (usocket:get-local-port listener)))
+  (unwind-protect
+       (assert (handler-case
+                   (progn (usocket:socket-close
+                           (usocket:socket-listen "127.0.0.1" port
+                                                  :element-type '(unsigned-byte 8)))
+                          nil)
+                 (usocket:address-in-use-error () t)))
+    (usocket:socket-close listener))
+  (assert (handler-case
+              (progn (usocket:socket-close
+                      (usocket:socket-connect "127.0.0.1" port
+                                              :element-type '(unsigned-byte 8)))
+                     nil)
+            (usocket:connection-refused-error () t))))
 
 #+egcl
 (let ((listener (usocket:socket-listen "127.0.0.1" 0
@@ -92,7 +136,7 @@
                                              :element-type '(unsigned-byte 8))))
                            (usocket:socket-close replacement)
                            t)
-                       (usocket:unknown-error () nil))))
+                       (usocket:address-in-use-error () nil))))
                (assert (eq reusable rebound))))
         (when peer (usocket:socket-close peer))
         (when client (usocket:socket-close client))

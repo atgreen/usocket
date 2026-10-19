@@ -8,13 +8,31 @@
     (check-type seconds (real (0) *))
     (ceiling (* seconds 1000))))
 
+;;; A failed socket call carries its OS errno, so EADDRINUSE becomes
+;;; ADDRESS-IN-USE-ERROR, ECONNREFUSED CONNECTION-REFUSED-ERROR, and so on;
+;;; before, every one was an UNKNOWN-ERROR with errno 0 (evergreen #427).
+;;; Looked up at run time rather than read as EGCL-EXT:SOCKET-OS-ERROR, so
+;;; this backend still loads on an EGCL that predates it and keeps the old
+;;; UNKNOWN-ERROR there.
+(defun egcl-socket-errno (condition)
+  "The OS errno CONDITION carries, or NIL."
+  (let ((type (find-symbol "SOCKET-OS-ERROR" "EGCL-EXT"))
+        (reader (find-symbol "SOCKET-OS-ERROR-ERRNO" "EGCL-EXT")))
+    (when (and type reader (typep condition type))
+      (funcall reader condition))))
+
 (defun handle-condition (condition &optional socket host-or-ip)
   (declare (ignore host-or-ip))
   (typecase condition
     (egcl-ext:io-timeout
      (error 'timeout-error :socket socket))
     ((or file-error stream-error)
-     (error 'unknown-error :socket socket :real-error condition))))
+     (let* ((errno (egcl-socket-errno condition))
+            (usock-error (and errno (map-errno-error errno))))
+       (if usock-error
+           (error usock-error :socket socket)
+           (error 'unknown-error :socket socket :real-error condition
+                                 :errno (or errno 0)))))))
 
 (defun socket-connect-internal
     (host &key port (protocol :stream) (element-type 'character)
@@ -57,8 +75,12 @@
 (defun socket-listen-internal
     (host &key port reuseaddress (reuse-address nil reuse-address-p)
                (backlog 5) (element-type 'character))
-  (unless (equal (egcl-internal::%expand-type-spec element-type)
-                 '(unsigned-byte 8))
+  ;; A listener carries no data, so a character listener -- usocket's default,
+  ;; and what a port probe that only listens and closes asks for -- is fine
+  ;; here. SOCKET-ACCEPT is where a character stream would be needed, and it
+  ;; still refuses one.
+  (unless (member (egcl-internal::%expand-type-spec element-type)
+                  '(character (unsigned-byte 8)) :test #'equal)
     (error 'unimplemented :feature element-type :context 'socket-listen))
   (when (pathnamep host)
     (error 'unimplemented :feature :unix-domain-socket :context 'socket-listen))
